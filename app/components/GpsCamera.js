@@ -19,7 +19,7 @@ const GpsCamera = () => {
         const now = new Date();
         const dateStr = now.toLocaleDateString("en-GB", {
           day: "2-digit",
-          month: "long",
+          month: "2-digit",
           year: "numeric",
         });
         const timeStr = now.toLocaleTimeString("en-US", {
@@ -36,24 +36,13 @@ const GpsCamera = () => {
           const geoData = await geoRes.json();
           const a = geoData.address;
 
-          // Creating the specific lines like your example
-          const line1 = `${a.city || a.town || a.village || "Junagadh"}, ${a.state || "Gujarat"}, India 🇮🇳`;
-
-          // Combine building/road/suburb for the detailed line
-          const line2 = [
-            a.house_number,
-            a.building,
-            a.road,
-            a.suburb,
-            a.postcode,
-          ]
-            .filter(Boolean)
-            .slice(0, 3)
-            .join(", ");
+          // Construct lines like the example
+          const line1 = `${a.city || a.town || "Junagadh"}, ${a.state || "Gujarat"}, India 🇮🇳`;
+          const line2 = `${a.suburb || a.neighbourhood || a.road || "Local Area"}, ${a.city || "Junagadh"}, ${a.state}, ${a.postcode || ""}, India`;
 
           const screenshot = webcamRef.current.getScreenshot();
-          // Updated Map URL for better centering
-          const mapUrl = `https://static-maps.yandex.ru/1.x/?ll=${longitude},${latitude}&z=17&l=sat&size=300,300`;
+          // Zoomed in Satellite Map
+          const mapUrl = `https://static-maps.yandex.ru/1.x/?ll=${longitude},${latitude}&z=17&l=sat&size=400,400`;
 
           const mainImg = new Image();
           const mapImg = new Image();
@@ -70,57 +59,86 @@ const GpsCamera = () => {
 
               ctx.drawImage(mainImg, 0, 0);
 
-              // --- LAYOUT CONSTANTS ---
-              const boxH = 180;
-              const boxY = canvas.height - boxH;
+              // --- LAYOUT CALCULATIONS ---
+              const boxPadding = 20;
+              const boxH = 190;
+              const boxW = canvas.width - boxPadding * 2;
+              const boxX = boxPadding;
+              const boxY = canvas.height - boxH - boxPadding;
 
-              // 3. Draw Dark Background
-              ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
-              ctx.fillRect(0, boxY, canvas.width, boxH);
+              // 2. Draw Rounded Black Box (The Overlay)
+              ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+              ctx.beginPath();
+              ctx.roundRect(boxX, boxY, boxW, boxH, 30);
+              ctx.fill();
 
-              // 4. Draw Map (Left Aligned & Center-Cropped)
-              const mapSize = 140;
-              const mapX = 20;
-              const mapY = boxY + (boxH - mapSize) / 2; // Perfectly centered vertically in the box
+              // 3. Draw Map (Fixed Square - No Overflow)
+              const mapSize = 150;
+              const mapX = boxX + 20;
+              const mapY = boxY + (boxH - mapSize) / 2;
 
               ctx.save();
               ctx.beginPath();
-              ctx.roundRect(mapX, mapY, mapSize, mapSize, 15);
-              ctx.clip();
-              // Draw map larger and offset to ensure it's "centered"
+              ctx.roundRect(mapX, mapY, mapSize, mapSize, 20);
+              ctx.clip(); // This prevents map overflow
+              // Offset the map draw to center it
               ctx.drawImage(mapImg, mapX, mapY, mapSize, mapSize);
+
+              // Draw a small Red Pin in the center of the map
+              ctx.fillStyle = "red";
+              ctx.beginPath();
+              ctx.arc(
+                mapX + mapSize / 2,
+                mapY + mapSize / 2,
+                6,
+                0,
+                Math.PI * 2,
+              );
+              ctx.fill();
               ctx.restore();
 
-              // 5. Draw Text (With Overflow Prevention)
-              ctx.fillStyle = "white";
+              // 4. Draw Text
               const textX = mapX + mapSize + 20;
+              const maxTextWidth = boxW - mapSize - 60;
 
-              // Line 1: Bold City
-              ctx.font = "bold 24px Arial";
-              ctx.fillText(line1.substring(0, 35), textX, boxY + 45);
+              ctx.fillStyle = "white";
 
-              // Line 2: Details (Smaller)
-              ctx.font = "18px Arial";
-              ctx.fillStyle = "#dddddd";
-              ctx.fillText(line2.substring(0, 45), textX, boxY + 80);
+              // Line 1: Bold Title
+              ctx.font = "bold 26px sans-serif";
+              ctx.fillText(line1, textX, boxY + 50, maxTextWidth);
+
+              // Line 2: Details (Wraps/Shortens if too long)
+              ctx.font = "18px sans-serif";
+              ctx.fillStyle = "#e0e0e0";
+              ctx.fillText(
+                line2.substring(0, 50),
+                textX,
+                boxY + 85,
+                maxTextWidth,
+              );
 
               // Line 3: Lat/Long
               ctx.fillStyle = "white";
               ctx.fillText(
-                `Lat ${latitude.toFixed(6)}° N  Long ${longitude.toFixed(6)}° E`,
+                `Lat ${latitude.toFixed(6)}° Long ${longitude.toFixed(6)}°`,
                 textX,
-                boxY + 115,
+                boxY + 120,
               );
 
-              // Line 4: Time
-              ctx.fillText(`${dateStr} ${timeStr}`, textX, boxY + 150);
+              // Line 4: Date/Time
+              ctx.fillText(
+                `${dateStr} ${timeStr} GMT +05:30`,
+                textX,
+                boxY + 155,
+              );
 
-              setImgSrc(canvas.toDataURL("image/jpeg", 0.9));
+              setImgSrc(canvas.toDataURL("image/jpeg", 0.95));
               setLoading(false);
             };
           };
         } catch (err) {
           setLoading(false);
+          alert("Check internet connection for Map/Address");
         }
       },
       (err) => setLoading(false),
@@ -131,6 +149,7 @@ const GpsCamera = () => {
   return (
     <div className="fixed inset-0 bg-black flex flex-col items-center">
       <Webcam
+        audio={false}
         ref={webcamRef}
         screenshotFormat="image/jpeg"
         videoConstraints={{ facingMode: "environment" }}
@@ -142,7 +161,7 @@ const GpsCamera = () => {
         <button
           onClick={capture}
           disabled={loading}
-          className="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center"
+          className="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center bg-transparent active:scale-95"
         >
           <div
             className={`w-16 h-16 rounded-full ${loading ? "bg-gray-500 animate-pulse" : "bg-white"}`}
@@ -154,20 +173,25 @@ const GpsCamera = () => {
 
       {imgSrc && (
         <div className="absolute inset-0 bg-black z-50 flex flex-col">
-          <div className="flex justify-between p-6 bg-gray-900 text-white">
-            <button onClick={() => setImgSrc(null)}>Retake</button>
+          <div className="flex justify-between p-6 bg-gray-900 border-b border-gray-800">
+            <button
+              onClick={() => setImgSrc(null)}
+              className="text-white text-lg"
+            >
+              Retake
+            </button>
             <a
               href={imgSrc}
               download="GPS_Photo.jpg"
-              className="font-bold text-blue-400"
+              className="text-blue-400 font-bold text-lg"
             >
-              Save Photo
+              Save to Gallery
             </a>
           </div>
           <div className="flex-1 flex items-center justify-center p-4">
             <img
               src={imgSrc}
-              className="max-w-full max-h-full rounded shadow-lg"
+              className="max-w-full max-h-full rounded-xl shadow-2xl"
               alt="preview"
             />
           </div>
