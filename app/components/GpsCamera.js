@@ -6,140 +6,169 @@ const GpsCamera = () => {
   const webcamRef = useRef(null);
   const canvasRef = useRef(null);
   const [imgSrc, setImgSrc] = useState(null);
-
   const [loading, setLoading] = useState(false);
 
-  const capture = useCallback(() => {
-    if (loading) return; // Prevent double-clicking
+  const capture = useCallback(async () => {
+    if (loading) return;
     setLoading(true);
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const { latitude, longitude } = position.coords;
-        const dateStr = new Date().toLocaleString();
 
-        // 1. Get the camera screenshot immediately
-        const screenshot = webcamRef.current.getScreenshot();
-        if (!screenshot) {
-          alert("Camera not ready");
-          setLoading(false);
-          return;
-        }
+        // Formatting Date to match your screenshot
+        const now = new Date();
+        const dateStr = now.toLocaleDateString("en-GB", {
+          weekday: "long",
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+        });
+        const timeStr = now.toLocaleTimeString("en-US", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true,
+        });
+        const fullTimestamp = `${dateStr} ${timeStr} GMT +05:30`;
 
-        // 2. Prepare Map URL (Using Yandex for satellite)
-        const mapUrl = `https://static-maps.yandex.ru/1.x/?ll=${longitude},${latitude}&z=15&l=sat&size=150,150`;
-
-        const canvas = canvasRef.current;
-        const ctx = canvas.getContext("2d");
-
-        const mainImg = new Image();
-        const mapImg = new Image();
-
-        // Function to draw everything once images are ready
-        const drawFinalPhoto = (includeMap = false) => {
-          canvas.width = mainImg.width;
-          canvas.height = mainImg.height;
-
-          // Draw Main Photo
-          ctx.drawImage(mainImg, 0, 0);
-
-          // Draw Overlay Bar
-          ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
-          ctx.fillRect(0, canvas.height - 180, canvas.width, 180);
-
-          let textXOffset = 30;
-
-          // Draw Map if successful
-          if (includeMap) {
-            ctx.drawImage(mapImg, 20, canvas.height - 160, 130, 130);
-            textXOffset = 170; // Move text to the right of the map
-          }
-
-          // Draw Text
-          ctx.fillStyle = "white";
-          ctx.font = "bold 24px Arial";
-          ctx.fillText(`GPS LOCATION`, textXOffset, canvas.height - 130);
-
-          ctx.font = "18px Arial";
-          ctx.fillText(
-            `Lat: ${latitude.toFixed(6)}`,
-            textXOffset,
-            canvas.height - 95,
+        try {
+          // 1. Fetch real Address (Reverse Geocode)
+          const geoRes = await fetch(
+            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`,
           );
-          ctx.fillText(
-            `Long: ${longitude.toFixed(6)}`,
-            textXOffset,
-            canvas.height - 65,
-          );
-          ctx.fillText(dateStr, textXOffset, canvas.height - 35);
+          const geoData = await geoRes.json();
+          const line1 = `${geoData.city}, ${geoData.principalSubdivision}, India 🇮🇳`;
+          const line2 = `${geoData.locality || ""}, ${geoData.city}, ${geoData.postcode || ""}`;
 
-          setImgSrc(canvas.toDataURL("image/jpeg", 0.9));
-          setLoading(false);
-        };
+          // 2. Prepare Images
+          const screenshot = webcamRef.current.getScreenshot();
+          const mapUrl = `https://static-maps.yandex.ru/1.x/?ll=${longitude},${latitude}&z=16&l=sat&size=200,200`;
 
-        // Load Main Image
-        mainImg.src = screenshot;
-        mainImg.onload = () => {
-          // Try to load Map
-          mapImg.crossOrigin = "anonymous";
-          mapImg.src = mapUrl;
+          const mainImg = new Image();
+          const mapImg = new Image();
+          mainImg.src = screenshot;
 
-          mapImg.onload = () => drawFinalPhoto(true);
+          mainImg.onload = () => {
+            mapImg.crossOrigin = "anonymous";
+            mapImg.src = mapUrl;
+            mapImg.onload = () => {
+              const canvas = canvasRef.current;
+              const ctx = canvas.getContext("2d");
+              canvas.width = mainImg.width;
+              canvas.height = mainImg.height;
 
-          // If Map fails or takes > 3 seconds, draw without it
-          mapImg.onerror = () => {
-            console.log("Map failed to load, capturing without map");
-            drawFinalPhoto(false);
+              // Draw Photo
+              ctx.drawImage(mainImg, 0, 0);
+
+              // 3. Draw Rounded Overlay Box (Bottom)
+              const boxW = canvas.width * 0.92;
+              const boxH = 180;
+              const x = (canvas.width - boxW) / 2;
+              const y = canvas.height - boxH - 40;
+
+              ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+              ctx.beginPath();
+              ctx.roundRect(x, y, boxW, boxH, 25);
+              ctx.fill();
+
+              // 4. Draw Rounded Map
+              ctx.save();
+              ctx.beginPath();
+              ctx.roundRect(x + 20, y + 20, 140, 140, 20);
+              ctx.clip();
+              ctx.drawImage(mapImg, x + 20, y + 20, 140, 140);
+              ctx.restore();
+
+              // 5. Draw Text (White)
+              ctx.fillStyle = "white";
+              ctx.font = "bold 28px sans-serif";
+              ctx.fillText(line1, x + 180, y + 55);
+
+              ctx.font = "20px sans-serif";
+              ctx.fillStyle = "#e0e0e0";
+              ctx.fillText(line2, x + 180, y + 90);
+
+              ctx.font = "18px sans-serif";
+              ctx.fillText(
+                `Lat ${latitude.toFixed(6)}° Long ${longitude.toFixed(6)}°`,
+                x + 180,
+                y + 125,
+              );
+              ctx.fillText(fullTimestamp, x + 180, y + 155);
+
+              setImgSrc(canvas.toDataURL("image/jpeg", 0.95));
+              setLoading(false);
+            };
           };
-
-          setTimeout(() => {
-            if (loading) drawFinalPhoto(false);
-          }, 3000);
-        };
+        } catch (err) {
+          alert("Error fetching map or address");
+          setLoading(false);
+        }
       },
       (err) => {
-        alert("Location Error: " + err.message);
+        alert("Please enable Location services");
         setLoading(false);
       },
       { enableHighAccuracy: true },
     );
   }, [webcamRef, loading]);
+
   return (
-    <div className="flex flex-col items-center bg-black min-h-screen p-4 text-white">
+    <div className="fixed inset-0 bg-black flex flex-col items-center justify-center overflow-hidden">
+      {/* 1. Full Screen Camera Feed */}
       <Webcam
         audio={false}
         ref={webcamRef}
         screenshotFormat="image/jpeg"
         videoConstraints={{ facingMode: "environment" }}
-        className="w-full max-w-md rounded-lg"
+        className="h-full w-full object-cover"
         playsInline
       />
 
-      <button
-        onClick={capture}
-        disabled={loading}
-        className={`mt-6 w-16 h-16 rounded-full border-4 border-white transition-all ${loading ? "bg-gray-500" : "bg-red-600 active:scale-90"}`}
-      >
-        {loading ? "..." : ""}
-      </button>
+      {/* 2. Floating Shutter Button */}
+      <div className="absolute bottom-10 flex flex-col items-center">
+        <button
+          onClick={capture}
+          disabled={loading}
+          className={`w-20 h-20 rounded-full border-4 border-white flex items-center justify-center transition-all 
+            ${loading ? "bg-gray-600" : "bg-transparent active:scale-90"}`}
+        >
+          <div
+            className={`w-16 h-16 rounded-full ${loading ? "bg-gray-400" : "bg-white"}`}
+          />
+        </button>
+      </div>
 
+      {/* 3. Hidden Canvas for Processing */}
       <canvas ref={canvasRef} className="hidden" />
 
+      {/* 4. Full-Screen Preview Overlay (Appears after capture) */}
       {imgSrc && (
-        <div className="mt-6 flex flex-col items-center">
-          <p className="mb-2 text-green-400">Photo Captured with GPS!</p>
+        <div className="absolute inset-0 bg-black z-50 flex flex-col items-center p-4">
+          <div className="flex justify-between w-full mb-4 px-4">
+            <button
+              onClick={() => setImgSrc(null)}
+              className="text-white text-lg"
+            >
+              Retake
+            </button>
+            <h2 className="text-white font-bold text-lg">Photo Saved</h2>
+            <a
+              href={imgSrc}
+              download={`GPS_${Date.now()}.jpg`}
+              className="text-blue-400 text-lg font-bold"
+            >
+              Save
+            </a>
+          </div>
           <img
             src={imgSrc}
-            alt="Preview"
-            className="w-full max-w-md border-2 border-white"
+            alt="Final"
+            className="rounded-lg shadow-2xl max-h-[80%]"
           />
-          <a
-            href={imgSrc}
-            download="gps-photo.jpg"
-            className="mt-4 bg-blue-500 px-6 py-2 rounded-lg font-bold"
-          >
-            Download to Gallery
-          </a>
+          <p className="text-gray-400 mt-4 text-center text-sm">
+            Tap "Save" to keep this in your gallery
+          </p>
         </div>
       )}
     </div>
