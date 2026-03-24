@@ -16,33 +16,55 @@ const GpsCamera = () => {
       async (position) => {
         const { latitude, longitude } = position.coords;
 
-        // Formatting Date to match your screenshot
         const now = new Date();
         const dateStr = now.toLocaleDateString("en-GB", {
           weekday: "long",
           day: "2-digit",
-          month: "2-digit",
+          month: "long",
           year: "numeric",
         });
         const timeStr = now.toLocaleTimeString("en-US", {
           hour: "2-digit",
           minute: "2-digit",
-          hour12: true,
+          second: "2-digit",
+          hour12: false,
         });
-        const fullTimestamp = `${dateStr} ${timeStr} GMT +05:30`;
+        const fullTimestamp = `${dateStr} ${timeStr}`;
 
         try {
-          // 1. Fetch real Address (Reverse Geocode)
+          // 1. Fetch Highly Detailed Address from Nominatim (OpenStreetMap)
           const geoRes = await fetch(
-            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`,
+            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`,
+            {
+              headers: { "Accept-Language": "en" },
+            },
           );
           const geoData = await geoRes.json();
-          const line1 = `${geoData.city}, ${geoData.principalSubdivision}, India 🇮🇳`;
-          const line2 = `${geoData.locality || ""}, ${geoData.city}, ${geoData.postcode || ""}`;
+
+          // Extracting parts for the two-line address style
+          const addr = geoData.address;
+          const city = addr.city || addr.town || addr.village || "Junagadh";
+          const state = addr.state || "Gujarat";
+          const country = addr.country || "India";
+
+          // Detailed line (Suburbs, Roads, Landmarks)
+          const detailedLine = [
+            addr.suburb,
+            addr.neighbourhood,
+            addr.residential,
+            addr.road,
+            addr.postcode,
+          ]
+            .filter(Boolean)
+            .join(", ");
+
+          const line1 = `${city}, ${state}, ${country} 🇮🇳`;
+          const line2 = detailedLine || `${city}, India`;
 
           // 2. Prepare Images
           const screenshot = webcamRef.current.getScreenshot();
-          const mapUrl = `https://static-maps.yandex.ru/1.x/?ll=${longitude},${latitude}&z=16&l=sat&size=200,200`;
+          // Using Yandex for Satellite View
+          const mapUrl = `https://static-maps.yandex.ru/1.x/?ll=${longitude},${latitude}&z=16&l=sat&size=250,250`;
 
           const mainImg = new Image();
           const mapImg = new Image();
@@ -54,59 +76,73 @@ const GpsCamera = () => {
             mapImg.onload = () => {
               const canvas = canvasRef.current;
               const ctx = canvas.getContext("2d");
+
+              // Match canvas to real photo size
               canvas.width = mainImg.width;
               canvas.height = mainImg.height;
 
               // Draw Photo
               ctx.drawImage(mainImg, 0, 0);
 
-              // 3. Draw Rounded Overlay Box (Bottom)
-              const boxW = canvas.width * 0.92;
-              const boxH = 180;
-              const x = (canvas.width - boxW) / 2;
-              const y = canvas.height - boxH - 40;
+              // 3. Draw The Modern Overlay Box (Bottom)
+              const boxW = canvas.width;
+              const boxH = 200; // Slightly taller for more text
+              const x = 0;
+              const y = canvas.height - boxH;
 
-              ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
-              ctx.beginPath();
-              ctx.roundRect(x, y, boxW, boxH, 25);
-              ctx.fill();
+              // Gradient or Solid Semi-Transparent Black
+              ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+              ctx.fillRect(x, y, boxW, boxH);
 
-              // 4. Draw Rounded Map
+              // 4. Draw Rounded Map (Left Side)
               ctx.save();
               ctx.beginPath();
-              ctx.roundRect(x + 20, y + 20, 140, 140, 20);
+              ctx.roundRect(20, y + 25, 150, 150, 15);
               ctx.clip();
-              ctx.drawImage(mapImg, x + 20, y + 20, 140, 140);
+              ctx.drawImage(mapImg, 20, y + 25, 150, 150);
               ctx.restore();
 
-              // 5. Draw Text (White)
+              // 5. Draw Text (Matching your Request)
+              const textX = 190;
               ctx.fillStyle = "white";
-              ctx.font = "bold 28px sans-serif";
-              ctx.fillText(line1, x + 180, y + 55);
 
-              ctx.font = "20px sans-serif";
-              ctx.fillStyle = "#e0e0e0";
-              ctx.fillText(line2, x + 180, y + 90);
+              // Title Line (Bold)
+              ctx.font = "bold 26px sans-serif";
+              ctx.fillText(line1, textX, y + 55);
 
+              // Detailed Address Line
+              ctx.font = "18px sans-serif";
+              ctx.fillStyle = "#ffffff";
+              ctx.fillText(line2, textX, y + 90);
+
+              // Lat/Long Line
               ctx.font = "18px sans-serif";
               ctx.fillText(
-                `Lat ${latitude.toFixed(6)}° Long ${longitude.toFixed(6)}°`,
-                x + 180,
+                `Lat ${latitude.toFixed(6)}° N  Long ${longitude.toFixed(6)}° W`,
+                textX,
                 y + 125,
               );
-              ctx.fillText(fullTimestamp, x + 180, y + 155);
+
+              // Timestamp Line
+              ctx.fillText(`${fullTimestamp} GMT +05:30`, textX, y + 160);
 
               setImgSrc(canvas.toDataURL("image/jpeg", 0.95));
               setLoading(false);
             };
+
+            // Fallback if Map fails
+            mapImg.onerror = () => {
+              console.error("Map failed to load");
+              setLoading(false);
+            };
           };
         } catch (err) {
-          alert("Error fetching map or address");
+          console.error(err);
           setLoading(false);
         }
       },
       (err) => {
-        alert("Please enable Location services");
+        alert("Location permission denied.");
         setLoading(false);
       },
       { enableHighAccuracy: true },
@@ -114,8 +150,7 @@ const GpsCamera = () => {
   }, [webcamRef, loading]);
 
   return (
-    <div className="fixed inset-0 bg-black flex flex-col items-center justify-center overflow-hidden">
-      {/* 1. Full Screen Camera Feed */}
+    <div className="fixed inset-0 bg-black flex flex-col items-center justify-center">
       <Webcam
         audio={false}
         ref={webcamRef}
@@ -125,50 +160,44 @@ const GpsCamera = () => {
         playsInline
       />
 
-      {/* 2. Floating Shutter Button */}
       <div className="absolute bottom-10 flex flex-col items-center">
         <button
           onClick={capture}
           disabled={loading}
-          className={`w-20 h-20 rounded-full border-4 border-white flex items-center justify-center transition-all 
-            ${loading ? "bg-gray-600" : "bg-transparent active:scale-90"}`}
+          className="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center bg-transparent active:scale-90 transition-all"
         >
           <div
-            className={`w-16 h-16 rounded-full ${loading ? "bg-gray-400" : "bg-white"}`}
+            className={`w-16 h-16 rounded-full ${loading ? "bg-gray-500 animate-pulse" : "bg-white"}`}
           />
         </button>
       </div>
 
-      {/* 3. Hidden Canvas for Processing */}
       <canvas ref={canvasRef} className="hidden" />
 
-      {/* 4. Full-Screen Preview Overlay (Appears after capture) */}
       {imgSrc && (
-        <div className="absolute inset-0 bg-black z-50 flex flex-col items-center p-4">
-          <div className="flex justify-between w-full mb-4 px-4">
+        <div className="absolute inset-0 bg-black z-50 flex flex-col items-center">
+          <div className="flex justify-between w-full p-6 bg-gray-900">
             <button
               onClick={() => setImgSrc(null)}
               className="text-white text-lg"
             >
               Retake
             </button>
-            <h2 className="text-white font-bold text-lg">Photo Saved</h2>
             <a
               href={imgSrc}
-              download={`GPS_${Date.now()}.jpg`}
+              download={`GPS_Cam_${Date.now()}.jpg`}
               className="text-blue-400 text-lg font-bold"
             >
-              Save
+              Save to Gallery
             </a>
           </div>
-          <img
-            src={imgSrc}
-            alt="Final"
-            className="rounded-lg shadow-2xl max-h-[80%]"
-          />
-          <p className="text-gray-400 mt-4 text-center text-sm">
-            Tap "Save" to keep this in your gallery
-          </p>
+          <div className="flex-1 flex items-center justify-center p-4">
+            <img
+              src={imgSrc}
+              alt="Final Result"
+              className="rounded shadow-2xl max-w-full max-h-full"
+            />
+          </div>
         </div>
       )}
     </div>
