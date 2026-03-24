@@ -7,76 +7,103 @@ const GpsCamera = () => {
   const canvasRef = useRef(null);
   const [imgSrc, setImgSrc] = useState(null);
 
-  const capture = useCallback(() => {
-    if (!navigator.geolocation) return alert("Geolocation not supported");
+  const [loading, setLoading] = useState(false);
 
-    setLoading(true); // Optional: add a loading state
+  const capture = useCallback(() => {
+    if (loading) return; // Prevent double-clicking
+    setLoading(true);
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const { latitude, longitude } = position.coords;
         const dateStr = new Date().toLocaleString();
 
-        // 1. Prepare the Static Map URL (Satellite Style)
-        // Using a free tier service (Replace YOUR_MAPBOX_TOKEN if you use Mapbox)
+        // 1. Get the camera screenshot immediately
+        const screenshot = webcamRef.current.getScreenshot();
+        if (!screenshot) {
+          alert("Camera not ready");
+          setLoading(false);
+          return;
+        }
+
+        // 2. Prepare Map URL (Using Yandex for satellite)
         const mapUrl = `https://static-maps.yandex.ru/1.x/?ll=${longitude},${latitude}&z=15&l=sat&size=150,150`;
 
-        const imageSrc = webcamRef.current.getScreenshot();
         const canvas = canvasRef.current;
         const ctx = canvas.getContext("2d");
 
-        const img = new Image();
+        const mainImg = new Image();
         const mapImg = new Image();
 
-        img.src = imageSrc;
-        // CrossOrigin is needed to allow canvas to "export" the map image
-        mapImg.crossOrigin = "anonymous";
-        mapImg.src = mapUrl;
+        // Function to draw everything once images are ready
+        const drawFinalPhoto = (includeMap = false) => {
+          canvas.width = mainImg.width;
+          canvas.height = mainImg.height;
 
-        // Wait for both images to load
-        img.onload = () => {
-          mapImg.onload = () => {
-            canvas.width = img.width;
-            canvas.height = img.height;
+          // Draw Main Photo
+          ctx.drawImage(mainImg, 0, 0);
 
-            // Draw Main Photo
-            ctx.drawImage(img, 0, 0);
+          // Draw Overlay Bar
+          ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+          ctx.fillRect(0, canvas.height - 180, canvas.width, 180);
 
-            // Draw Overlay Bar
-            ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
-            ctx.fillRect(0, canvas.height - 160, canvas.width, 160);
+          let textXOffset = 30;
 
-            // DRAW THE MAP (on the left)
-            ctx.drawImage(mapImg, 20, canvas.height - 140, 120, 120);
+          // Draw Map if successful
+          if (includeMap) {
+            ctx.drawImage(mapImg, 20, canvas.height - 160, 130, 130);
+            textXOffset = 170; // Move text to the right of the map
+          }
 
-            // DRAW TEXT (beside the map)
-            ctx.fillStyle = "white";
-            ctx.font = "bold 22px Arial";
-            ctx.fillText(`GPS LOCATION`, 160, canvas.height - 110);
+          // Draw Text
+          ctx.fillStyle = "white";
+          ctx.font = "bold 24px Arial";
+          ctx.fillText(`GPS LOCATION`, textXOffset, canvas.height - 130);
 
-            ctx.font = "16px Arial";
-            ctx.fillText(
-              `Lat: ${latitude.toFixed(6)}`,
-              160,
-              canvas.height - 80,
-            );
-            ctx.fillText(
-              `Long: ${longitude.toFixed(6)}`,
-              160,
-              canvas.height - 55,
-            );
-            ctx.fillText(dateStr, 160, canvas.height - 30);
+          ctx.font = "18px Arial";
+          ctx.fillText(
+            `Lat: ${latitude.toFixed(6)}`,
+            textXOffset,
+            canvas.height - 95,
+          );
+          ctx.fillText(
+            `Long: ${longitude.toFixed(6)}`,
+            textXOffset,
+            canvas.height - 65,
+          );
+          ctx.fillText(dateStr, textXOffset, canvas.height - 35);
 
-            const finalDataUrl = canvas.toDataURL("image/jpeg", 0.9);
-            setImgSrc(finalDataUrl);
-            setLoading(false);
+          setImgSrc(canvas.toDataURL("image/jpeg", 0.9));
+          setLoading(false);
+        };
+
+        // Load Main Image
+        mainImg.src = screenshot;
+        mainImg.onload = () => {
+          // Try to load Map
+          mapImg.crossOrigin = "anonymous";
+          mapImg.src = mapUrl;
+
+          mapImg.onload = () => drawFinalPhoto(true);
+
+          // If Map fails or takes > 3 seconds, draw without it
+          mapImg.onerror = () => {
+            console.log("Map failed to load, capturing without map");
+            drawFinalPhoto(false);
           };
+
+          setTimeout(() => {
+            if (loading) drawFinalPhoto(false);
+          }, 3000);
         };
       },
-      (err) => alert(err.message),
+      (err) => {
+        alert("Location Error: " + err.message);
+        setLoading(false);
+      },
       { enableHighAccuracy: true },
     );
-  }, [webcamRef]);
+  }, [webcamRef, loading]);
   return (
     <div className="flex flex-col items-center bg-black min-h-screen p-4 text-white">
       <Webcam
@@ -90,8 +117,11 @@ const GpsCamera = () => {
 
       <button
         onClick={capture}
-        className="mt-6 bg-red-600 w-16 h-16 rounded-full border-4 border-white active:scale-90 transition-all"
-      />
+        disabled={loading}
+        className={`mt-6 w-16 h-16 rounded-full border-4 border-white transition-all ${loading ? "bg-gray-500" : "bg-red-600 active:scale-90"}`}
+      >
+        {loading ? "..." : ""}
+      </button>
 
       <canvas ref={canvasRef} className="hidden" />
 
